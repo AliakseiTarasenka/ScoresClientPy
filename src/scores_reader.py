@@ -1,14 +1,16 @@
+from abc import ABC, abstractmethod
+import os
+import json
 import argparse
 import time
 import requests
-import os
-import json
+from requests.exceptions import HTTPError
 import urllib3
 from urllib3.exceptions import InsecureRequestWarning
 
 # Suppress only the single InsecureRequestWarning from urllib3
 urllib3.disable_warnings(InsecureRequestWarning)
-from abc import ABC, abstractmethod
+
 
 class APIConfig:
     # URLs for the different services or environments
@@ -37,7 +39,8 @@ class APIConfig:
         if key in APIConfig.URLs:
             return APIConfig.URLs[key]
         else:
-            raise ValueError("Invalid URL key provided. Available keys are: {}".format(', '.join(APIConfig.URLs.keys())))
+            raise ValueError(
+                "Invalid URL key provided. Available keys are: {}".format(', '.join(APIConfig.URLs.keys())))
 
 
 class APIClient:
@@ -49,10 +52,12 @@ class APIClient:
         if response.status_code == 200:
             return response.text
         else:
-            raise Exception(f"Failed to fetch data: {response.status_code} - {response.reason}")
+            raise HTTPError(f"Failed to fetch data: {response.status_code} - {response.reason}")
+
 
 class Game:
-    def __init__(self, game_id, date, time, home_team, home_abbr, home_score, away_team, away_abbr, away_score, is_finished, division):
+    def __init__(self, game_id, date, time, home_team, home_abbr, home_score, away_team, away_abbr, away_score,
+                 is_finished, division):
         self.game_id = game_id
         self.date = date
         self.time = time
@@ -74,6 +79,7 @@ class Game:
             f"Division: {self.division}\n"
             f"Game Finished: {'Yes' if self.is_finished else 'No'}\n"
         )
+
 
 class GameParser:
     @staticmethod
@@ -112,6 +118,8 @@ class GameParser:
                 print(f"Warning: An error occurred while processing a game: {e}")
 
         return games
+
+
 class GameEvent:
     def __init__(self, event_time, team, event_type, assist=None, scorer=None, home_score=None, away_score=None):
         self.event_time = event_time
@@ -127,6 +135,7 @@ class GameEvent:
         if self.event_type == "S":
             details += f" (Assist: {self.assist}, Scorer: {self.scorer}, Scores: {self.home_score}-{self.away_score})"
         return details
+
 
 class GameEventParser:
     @staticmethod
@@ -152,13 +161,9 @@ class GameEventParser:
             away_players = event_data['p'].get('a', {})
 
             if home_players:
-                game_details['players']['home'] = {
-                    player_id: player_name for player_id, player_name in home_players.items()
-                }
+                game_details['players']['home'] = dict(home_players)
             if away_players:
-                game_details['players']['away'] = {
-                    player_id: player_name for player_id, player_name in away_players.items()
-                }
+                game_details['players']['away'] = dict(away_players)
         # Handling the presence of game events
         if 'e' in event_data:
             game_details['events'] = [
@@ -204,14 +209,13 @@ class Command(ABC):
     @abstractmethod
     def execute(self, data):
         """Each command must implement the execute method."""
-        pass
-
 
 class CheckGameSchedule(Command):
     def execute(self, data):
         games = self.client.post(data)
         games = GameParser.parse(games)
         return "\n".join(str(game) for game in games)
+
 
 class CheckGameEvents(Command):
     def execute(self, data):
@@ -283,6 +287,7 @@ class CheckGameEvents(Command):
         if not os.path.exists(directory):
             os.makedirs(directory)
 
+
 def countdown(minutes, file_path, command, data):
     total_seconds = minutes * 60
     for remaining_seconds in range(total_seconds, -1, -1):
@@ -300,6 +305,7 @@ def countdown(minutes, file_path, command, data):
 
         time.sleep(1)
 
+
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Ultimate Frisbee Game Information API Client")
     parser.add_argument("--url", choices=['test', 'rondo'], required=True, help="URL to use (test or rondo)")
@@ -308,6 +314,7 @@ def parse_arguments():
     parser.add_argument("--start", action='store_true', help="Flag to start timer and processing game events")
 
     return parser.parse_args()
+
 
 # Factories for Commands
 class CommandFactory:
@@ -321,6 +328,7 @@ class CommandFactory:
         if cmd_class:
             return cmd_class(client)
         raise ValueError("Invalid command type provided")
+
 
 # Main function split improvement
 def setup_game_environment(args):
@@ -340,6 +348,7 @@ def setup_game_environment(args):
     data = game_details if args.game else schedule_details
     return client, data, command_type
 
+
 def main():
     args = parse_arguments()
     client, data, cmd_type = setup_game_environment(args)
@@ -352,6 +361,7 @@ def main():
 
     result = command.execute(data)
     print(result)
+
 
 if __name__ == '__main__':
     main()
