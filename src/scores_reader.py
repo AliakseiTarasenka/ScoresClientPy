@@ -1,3 +1,4 @@
+from abc import ABC, abstractmethod
 import argparse
 import asyncio
 import json
@@ -12,10 +13,13 @@ from urllib3.exceptions import InsecureRequestWarning
 
 # Suppress only the single InsecureRequestWarning from urllib3
 urllib3.disable_warnings(InsecureRequestWarning)
-from abc import ABC, abstractmethod
+
 
 
 class APIConfig:
+    """
+    APIConfig class
+    """
     # URLs for the different services or environments
     URLs = {
         "test": "https://scores.frisbee.pl/test3/ext/watchlive.php/",
@@ -28,8 +32,7 @@ class APIConfig:
 
     @staticmethod
     def get_base_url(key):
-        """
-        Returns the base URL corresponding to the given configuration key.
+        """Returns the base URL corresponding to the given configuration key.
 
         Args:
         key (str): Configuration key which can be 'test', 'wu' or 'pomeranian'.
@@ -42,15 +45,16 @@ class APIConfig:
         """
         if key in APIConfig.URLs:
             return APIConfig.URLs[key]
-        else:
-            raise ValueError(
-                "Invalid URL key provided. Available keys are: {}".format(
-                    ", ".join(APIConfig.URLs.keys())
-                )
-            )
+
+        raise ValueError(
+            f"Invalid URL key provided. Available keys are: {', '.join(APIConfig.URLs.keys())}"
+        )
 
 
 class APIClient:
+    """"
+    APIClient class
+    """
     def __init__(self, base_url):
         self.base_url = base_url
 
@@ -69,6 +73,9 @@ class APIClient:
 
 
 class Game:
+    """"
+    Game class
+    """
     def __init__(
         self,
         game_id,
@@ -107,8 +114,13 @@ class Game:
 
 
 class GameParser:
+    """
+    GameParser class
+    """
     @staticmethod
     def parse(response_text):
+        """"
+        Parse the response text into a Game object."""
         if not response_text.strip():
             return []
 
@@ -148,6 +160,9 @@ class GameParser:
 
 
 class GameEvent:
+    """"
+    GameEvent class
+    """
     def __init__(
         self,
         event_time,
@@ -174,8 +189,13 @@ class GameEvent:
 
 
 class GameEventParser:
+    """"
+    GameEventParser class
+    """
     @staticmethod
     def parse_event_data(response_text):
+        """"
+        Parse the response text into a GameEvent object."""
         try:
             event_data = json.loads(response_text)
         except json.JSONDecodeError:
@@ -244,6 +264,8 @@ class GameEventParser:
 
     @staticmethod
     def get_player_name(game_details, team, shirt_number):
+        """"
+        Get the player's name for a team and shirt number."""
         if shirt_number is None:
             return None
         team_key = "home" if team == "h" else "away"
@@ -251,31 +273,40 @@ class GameEventParser:
         return players.get(str(shirt_number))
 
 
+# command pattern:
 class Command(ABC):
+    """"
+    Abstract Command class
+    """
     def __init__(self, client):
         self.client = client
 
     @abstractmethod
     async def execute(self, data):
         """Each command must implement the execute method."""
-        pass
 
 
-class CheckGameSchedule(Command):
+class ProcessGameSchedule(Command):
+    """"
+    ProcessGameSchedule class
+    """
     async def execute(self, data):
         games = await self.client.post(data)
         games = GameParser.parse(games)
         return "\n".join(str(game) for game in games)
 
 
-class CheckGameEvents(Command):
+class ProcessGameEvents(Command):
+    """"
+    ProcessGameEvents class"""
     async def execute(self, data):
         game_details = await self.client.post(data)
         event_details = GameEventParser.parse_event_data(game_details)
         return self.process_event_data(event_details)
 
     def process_event_data(self, event_details):
-
+        """"
+        Process the event data"""
         # Handling team rosters
         home_players = event_details.get("players", {}).get("home", {})
         away_players = event_details.get("players", {}).get("away", {})
@@ -331,26 +362,35 @@ class CheckGameEvents(Command):
 
         return json.dumps(event_details, indent=4)
 
-    async def write_to_file(self, filepath, data):
+    async def write_to_file(self, filepath: str, data) -> None:
+        """"
+        Write data to file"""
         if data:
             self.ensure_directory(filepath)
             async with aiofiles.open(filepath, "w", encoding="utf-8") as file:
                 await file.write(data + "\n")
 
-    async def write_team_roster(self, filepath, players):
+    async def write_team_roster(self, filepath: str, players) -> None:
+        """
+        Write team roster file"""
         self.ensure_directory(filepath)
         async with aiofiles.open(filepath, "w", encoding="utf-8") as file:
             for player_id, player_name in players.items():
                 await file.write(f"{player_id}: {player_name}\n")
 
     @staticmethod
-    def ensure_directory(filepath):
+    def ensure_directory(filepath: str) -> None:
+        """
+        Ensure directory exists
+        """
         directory = os.path.dirname(filepath)
         if not os.path.exists(directory):
             os.makedirs(directory)
 
 
-async def countdown(minutes, file_path, command, data):
+async def countdown(minutes: int, file_path: str, command, data) -> None:
+    """"
+    Countdown function"""
     total_seconds = minutes * 60
     game_time = 0
     game_stopped = True
@@ -358,7 +398,9 @@ async def countdown(minutes, file_path, command, data):
     events_request_sent = False
     last_now = 0
     while True:
-        now = round(time.time())
+        now = round(
+            time.time()
+        )  # time.perf_counter() - it’s more precise than time.time()
         if last_now != now:
             last_now = now
             if game_stopped:
@@ -373,7 +415,7 @@ async def countdown(minutes, file_path, command, data):
             print(time_str)
             async with aiofiles.open(file_path, "w", encoding="utf-8") as file:
                 await file.write(time_str)
-                file.flush()
+                await file.flush()
 
             # Trigger event checking every 5 seconds
             if not events_request_sent and now % 5 == 0:
@@ -417,9 +459,16 @@ def parse_arguments():
 
 # Factories for Commands
 class CommandFactory:
+    """"
+    Command Factory class"""
     @staticmethod
-    def get_command(client, cmd_type):
-        commands = {"game_events": CheckGameEvents, "game_schedule": CheckGameSchedule}
+    def get_command(client:APIClient, cmd_type: str) -> Command:
+        """"
+        Get command class"""
+        commands = {
+            "game_events": ProcessGameEvents,
+            "game_schedule": ProcessGameSchedule,
+        }
         cmd_class = commands.get(cmd_type)
         if cmd_class:
             return cmd_class(client)
@@ -428,6 +477,8 @@ class CommandFactory:
 
 # Main function split improvement
 def setup_game_environment(args):
+    """"
+    Setup game environment"""
     base_url = APIConfig.get_base_url(args.url)
     client = APIClient(base_url)
     game_details = {
@@ -443,6 +494,8 @@ def setup_game_environment(args):
 
 
 async def main():
+    """"
+    Main function"""
     args = parse_arguments()
     client, data, cmd_type = setup_game_environment(args)
     command = CommandFactory.get_command(client, cmd_type)
